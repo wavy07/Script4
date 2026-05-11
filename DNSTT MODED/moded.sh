@@ -300,8 +300,8 @@ EOF
 #define SOCKET_TIMEOUT 1.0
 #define MAX_EVENTS 8192
 #define REQ_TABLE_SIZE 131072
-#define EXT_EDNS 1800
-#define INT_EDNS 50000
+#define EXT_EDNS 1200
+#define INT_EDNS 1800
 
 typedef struct {
     int fd;
