@@ -247,7 +247,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1500 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
+ExecStart=$SLOWDNS_BINARY -udp :$SLOWDNS_PORT -mtu 1800 -privkey-file /etc/slowdns/server.key $NAMESERVER 127.0.0.1:$SSHD_PORT
 Restart=always
 RestartSec=5
 User=root
@@ -301,7 +301,7 @@ EOF
 #define MAX_EVENTS 8192
 #define REQ_TABLE_SIZE 131072
 #define EXT_EDNS 1800
-#define INT_EDNS 4800
+#define INT_EDNS 50000
 
 typedef struct {
     int fd;
