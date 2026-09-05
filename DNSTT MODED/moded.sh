@@ -295,13 +295,13 @@ EOF
 
 #define LISTEN_PORT 53
 #define SLOWDNS_PORT 5300
-#define BUFFER_SIZE 8192
-#define UPSTREAM_POOL 128
-#define SOCKET_TIMEOUT 1.0
-#define MAX_EVENTS 8192
-#define REQ_TABLE_SIZE 131072
-#define EXT_EDNS 1800
-#define INT_EDNS 100000
+#define BUFFER_SIZE 16384
+#define UPSTREAM_POOL 512
+#define MAX_EVENTS 16384
+#define REQ_TABLE_SIZE 262144
+#define SOCKET_TIMEOUT 3.0
+#define EXT_EDNS 1400
+#define INT_EDNS 4096
 
 typedef struct {
     int fd;
@@ -427,7 +427,7 @@ int main() {
 
 sock=socket(AF_INET,SOCK_DGRAM,0);
 
-int bufsize = 4 * 1024 * 1024;
+int bufsize = 32 * 1024 * 1024;
 setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
 setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize));
 
@@ -452,9 +452,10 @@ setsockopt(sock,SOL_SOCKET,SO_REUSEPORT,&opt,sizeof(opt));
     for(int i=0;i<UPSTREAM_POOL;i++){
         upstreams[i].fd=socket(AF_INET,SOCK_DGRAM,0);
 
-        int bufsize = 4 * 1024 * 1024;
+        int bufsize = 32 * 1024 * 1024;
         setsockopt(upstreams[i].fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
         setsockopt(upstreams[i].fd, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize));
+
 
         fcntl(upstreams[i].fd,F_SETFL,O_NONBLOCK);
         struct epoll_event ue={.events=EPOLLIN,.data.fd=upstreams[i].fd};
