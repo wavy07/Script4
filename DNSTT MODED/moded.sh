@@ -15,7 +15,7 @@ fi
 # ============================================================================
 SSHD_PORT=22
 SLOWDNS_PORT=5300
-GITHUB_BASE="https://raw.githubusercontent.com/iddie09/SLOW-DNS-SCRIPT4/main/DNSTT%20MODED"
+GITHUB_BASE="https://raw.githubusercontent.com/wavy07/script4/main/DNSTT%20MODED"
 
 # ============================================================================
 # MODERN COLORS & DESIGN
