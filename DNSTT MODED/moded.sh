@@ -266,19 +266,18 @@ EOF
     # STEP 4: COMPILE EDNS PROXY
     # ============================================================================
     print_step "4"
-    print_info "Compiling high-performance EDNS Proxy"
-    
-    # Check for gcc
-    if ! command -v gcc &>/dev/null; then
-        print_info "Installing compiler tools"
-        echo -ne "  ${CYAN}Installing gcc...${NC}"
-        apt update > /dev/null 2>&1 && apt install -y gcc > /dev/null 2>&1 &
-        show_progress $!
-        echo -e "\r  ${GREEN}Compiler installed${NC}"
-    fi
-    
-    # Create optimized C code
-    cat > /tmp/edns.c << 'EOF'
+print_info "Compiling high-performance EDNS Proxy"
+
+# Check for gcc
+if ! command -v gcc &>/dev/null; then
+    print_info "Installing compiler tools"
+    echo -ne "  ${CYAN}Installing gcc...${NC}"
+    apt update > /dev/null 2>&1 && apt install -y gcc > /dev/null 2>&1 &
+    show_progress $!
+    echo -e "\r  ${GREEN}Compiler installed${NC}"
+fi
+
+cat > /tmp/edns.c << 'EOF'
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -295,225 +294,793 @@ EOF
 
 #define LISTEN_PORT 53
 #define SLOWDNS_PORT 5300
-#define BUFFER_SIZE 8192
-#define UPSTREAM_POOL 128
-#define SOCKET_TIMEOUT 1.0
-#define MAX_EVENTS 8192
-#define REQ_TABLE_SIZE 131072
+
+/* 1-core VPS optimized */
+#define BUFFER_SIZE 16384
+#define UPSTREAM_POOL 256
+#define SOCKET_TIMEOUT 0.75
+#define MAX_EVENTS 4096
+#define REQ_TABLE_SIZE 262144
+
+/*
+ * External/client-facing EDNS payload.
+ * Keep this conservative because the client/network path
+ * must also be able to transport it without excessive fragmentation.
+ */
 #define EXT_EDNS 1800
-#define INT_EDNS 50000
+
+/*
+ * Internal EDNS payload toward the local SlowDNS service.
+ * Increase experimentally rather than jumping directly to 50 KB.
+ */
+#define INT_EDNS 8192
 
 typedef struct {
     int fd;
     int busy;
-    time_t last_used;
+    uint64_t last_used;
 } upstream_t;
 
 typedef struct req_entry {
     uint16_t req_id;
     int upstream_idx;
     double timestamp;
+
     struct sockaddr_in client_addr;
     socklen_t addr_len;
+
     struct req_entry *next;
 } req_entry_t;
 
 static upstream_t upstreams[UPSTREAM_POOL];
 static req_entry_t *req_table[REQ_TABLE_SIZE];
-static int sock, epoll_fd;
+
+static int sock;
+static int epoll_fd;
+
 static volatile sig_atomic_t shutdown_flag = 0;
 
-double now() {
+static inline double now(void)
+{
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec / 1e9;
+
+    return (double)ts.tv_sec +
+           (double)ts.tv_nsec / 1000000000.0;
 }
 
-uint16_t get_txid(unsigned char *b) {
+static inline uint16_t get_txid(const unsigned char *b)
+{
     return ((uint16_t)b[0] << 8) | b[1];
 }
 
-uint32_t req_hash(uint16_t id) {
+static inline uint32_t req_hash(uint16_t id)
+{
     return id & (REQ_TABLE_SIZE - 1);
 }
 
-int patch_edns(unsigned char *buf, int len, int size) {
-    if (len < 12) return len;
+
+/*
+ * Modify EDNS UDP payload size.
+ *
+ * This function intentionally checks boundaries while parsing
+ * so malformed DNS packets don't make the proxy read outside
+ * the received buffer.
+ */
+static int patch_edns(
+    unsigned char *buf,
+    int len,
+    int size
+)
+{
+    if (len < 12)
+        return len;
+
     int off = 12;
-    int qd = (buf[4] << 8) | buf[5];
-    for (int i=0;i<qd;i++) {
-        while (buf[off]) off++;
+
+    int qd =
+        ((int)buf[4] << 8) |
+        buf[5];
+
+    /*
+     * Skip DNS questions.
+     */
+    for (int i = 0; i < qd; i++) {
+
+        while (off < len && buf[off] != 0)
+            off++;
+
+        if (off >= len)
+            return len;
+
+        /*
+         * terminating zero + QTYPE + QCLASS
+         */
+        if (off + 5 > len)
+            return len;
+
         off += 5;
     }
-    int ar = (buf[10] << 8) | buf[11];
-    for (int i=0;i<ar;i++) {
-        if (buf[off]==0 && off+4<len && ((buf[off+1]<<8)|buf[off+2])==41) {
-            buf[off+3]=size>>8;
-            buf[off+4]=size&255;
+
+    int ar =
+        ((int)buf[10] << 8) |
+        buf[11];
+
+    /*
+     * Search additional records for OPT RR.
+     */
+    for (int i = 0; i < ar; i++) {
+
+        if (off + 11 > len)
             return len;
+
+        /*
+         * OPT record:
+         *
+         * NAME   1 byte
+         * TYPE   2 bytes
+         * CLASS  2 bytes = UDP payload size
+         */
+        if (buf[off] == 0) {
+
+            uint16_t type =
+                ((uint16_t)buf[off + 1] << 8) |
+                buf[off + 2];
+
+            if (type == 41) {
+
+                buf[off + 3] =
+                    (unsigned char)((size >> 8) & 0xff);
+
+                buf[off + 4] =
+                    (unsigned char)(size & 0xff);
+
+                return len;
+            }
         }
+
+        /*
+         * Move to next additional record.
+         *
+         * Full DNS RR parsing is preferable for arbitrary
+         * packets, but preserve the original proxy behavior.
+         */
         off++;
     }
+
     return len;
 }
 
-int get_upstream() {
-    time_t t = time(NULL);
-    for (int i=0;i<UPSTREAM_POOL;i++) {
-        if (upstreams[i].busy && t - upstreams[i].last_used > 2)
+
+/*
+ * Find an available upstream socket.
+ *
+ * 256 sockets is deliberately moderate for a 1-core VPS.
+ */
+static inline int get_upstream(void)
+{
+    uint64_t t = (uint64_t)time(NULL);
+
+    for (int i = 0; i < UPSTREAM_POOL; i++) {
+
+        /*
+         * Release stale entries.
+         */
+        if (upstreams[i].busy &&
+            t - upstreams[i].last_used > 2) {
+
             upstreams[i].busy = 0;
+        }
+
         if (!upstreams[i].busy) {
+
             upstreams[i].busy = 1;
             upstreams[i].last_used = t;
+
             return i;
         }
     }
+
     return -1;
 }
 
-void release_upstream(int i) {
-    if (i>=0 && i<UPSTREAM_POOL) upstreams[i].busy = 0;
+
+static inline void release_upstream(int i)
+{
+    if (i >= 0 && i < UPSTREAM_POOL)
+        upstreams[i].busy = 0;
 }
 
-void insert_req(int uidx, unsigned char *buf, struct sockaddr_in *c, socklen_t l) {
-    req_entry_t *e = calloc(1,sizeof(*e));
+
+/*
+ * Insert request into hash table.
+ */
+static void insert_req(
+    int uidx,
+    unsigned char *buf,
+    struct sockaddr_in *client,
+    socklen_t addr_len
+)
+{
+    req_entry_t *e =
+        calloc(1, sizeof(req_entry_t));
+
+    if (!e)
+        return;
+
     e->upstream_idx = uidx;
     e->req_id = get_txid(buf);
     e->timestamp = now();
-    e->client_addr = *c;
-    e->addr_len = l;
-    uint32_t h = req_hash(e->req_id);
-    e->next = req_table[h];
+
+    e->client_addr = *client;
+    e->addr_len = addr_len;
+
+    uint32_t h =
+        req_hash(e->req_id);
+
+    e->next =
+        req_table[h];
+
     req_table[h] = e;
 }
 
-req_entry_t *find_req(uint16_t id) {
-    uint32_t h = req_hash(id);
-    for (req_entry_t *e=req_table[h]; e; e=e->next)
-        if (e->req_id == id) return e;
+
+static req_entry_t *find_req(uint16_t id)
+{
+    uint32_t h =
+        req_hash(id);
+
+    req_entry_t *e =
+        req_table[h];
+
+    while (e) {
+
+        if (e->req_id == id)
+            return e;
+
+        e = e->next;
+    }
+
     return NULL;
 }
 
-void delete_req(req_entry_t *e) {
+
+static void delete_req(req_entry_t *e)
+{
+    if (!e)
+        return;
+
     release_upstream(e->upstream_idx);
-    uint32_t h = req_hash(e->req_id);
-    req_entry_t **pp=&req_table[h];
-    while(*pp){
-        if(*pp==e){ *pp=e->next; free(e); return; }
-        pp=&(*pp)->next;
-    }
-}
 
-void cleanup_expired() {
-    double t=now();
-    for(int i=0;i<REQ_TABLE_SIZE;i++){
-        req_entry_t **pp=&req_table[i];
-        while(*pp){
-            if(t-(*pp)->timestamp > SOCKET_TIMEOUT){
-                req_entry_t *o=*pp;
-                release_upstream(o->upstream_idx);
-                *pp=o->next;
-                free(o);
-            } else pp=&(*pp)->next;
+    uint32_t h =
+        req_hash(e->req_id);
+
+    req_entry_t **pp =
+        &req_table[h];
+
+    while (*pp) {
+
+        if (*pp == e) {
+
+            *pp = e->next;
+
+            free(e);
+
+            return;
         }
+
+        pp =
+            &(*pp)->next;
     }
 }
 
-void sig_handler(int s){ shutdown_flag=1; }
 
-int main() {
-    signal(SIGINT,sig_handler);
-    signal(SIGTERM,sig_handler);
+/*
+ * Cleanup expired requests.
+ *
+ * Run periodically instead of doing a full table scan
+ * every single epoll iteration.
+ */
+static void cleanup_expired(void)
+{
+    double t = now();
 
-sock=socket(AF_INET,SOCK_DGRAM,0);
+    for (int i = 0; i < REQ_TABLE_SIZE; i++) {
 
-int bufsize = 4 * 1024 * 1024;
-setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
-setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize));
+        req_entry_t **pp =
+            &req_table[i];
 
-int opt=1;
-setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
-setsockopt(sock,SOL_SOCKET,SO_REUSEPORT,&opt,sizeof(opt));
-    fcntl(sock,F_SETFL,O_NONBLOCK);
+        while (*pp) {
 
-    struct sockaddr_in a={0};
-    a.sin_family=AF_INET; a.sin_port=htons(LISTEN_PORT);
-    a.sin_addr.s_addr=INADDR_ANY;
-    bind(sock,(void*)&a,sizeof(a));
+            req_entry_t *e =
+                *pp;
 
-    struct sockaddr_in slow={0};
-    slow.sin_family=AF_INET; slow.sin_port=htons(SLOWDNS_PORT);
-    inet_pton(AF_INET,"127.0.0.1",&slow.sin_addr);
+            if (t - e->timestamp >
+                SOCKET_TIMEOUT) {
 
-    epoll_fd=epoll_create1(0);
-    struct epoll_event ev={.events=EPOLLIN,.data.fd=sock};
-    epoll_ctl(epoll_fd,EPOLL_CTL_ADD,sock,&ev);
+                release_upstream(
+                    e->upstream_idx
+                );
 
-    for(int i=0;i<UPSTREAM_POOL;i++){
-        upstreams[i].fd=socket(AF_INET,SOCK_DGRAM,0);
+                *pp =
+                    e->next;
 
-        int bufsize = 4 * 1024 * 1024;
-        setsockopt(upstreams[i].fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
-        setsockopt(upstreams[i].fd, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize));
+                free(e);
 
-        fcntl(upstreams[i].fd,F_SETFL,O_NONBLOCK);
-        struct epoll_event ue={.events=EPOLLIN,.data.fd=upstreams[i].fd};
-        epoll_ctl(epoll_fd,EPOLL_CTL_ADD,upstreams[i].fd,&ue);
-    }
-
-    struct epoll_event events[MAX_EVENTS];
-
-    while(!shutdown_flag){
-        cleanup_expired();
-        int n=epoll_wait(epoll_fd,events,MAX_EVENTS,10);
-        for(int i=0;i<n;i++){
-            int fd=events[i].data.fd;
-            if(fd==sock){
-                unsigned char buf[BUFFER_SIZE];
-                struct sockaddr_in c; socklen_t l=sizeof(c);
-                int len=recvfrom(sock,buf,sizeof(buf),0,(void*)&c,&l);
-                if(len>0){
-                    patch_edns(buf,len,INT_EDNS);
-                    int u=get_upstream();
-                    if(u>=0){
-                        insert_req(u,buf,&c,l);
-                        sendto(upstreams[u].fd,buf,len,0,(void*)&slow,sizeof(slow));
-                    }
-                }
             } else {
-                unsigned char buf[BUFFER_SIZE];
-                int len=recv(fd,buf,sizeof(buf),0);
-                if(len>0){
-                    uint16_t id=get_txid(buf);
-                    req_entry_t *e=find_req(id);
-                    if(e){
-                        patch_edns(buf,len,EXT_EDNS);
-                        sendto(sock,buf,len,0,(void*)&e->client_addr,e->addr_len);
-                        delete_req(e);
-                    }
-                }
+
+                pp =
+                    &e->next;
             }
         }
     }
+}
+
+
+static void sig_handler(int sig)
+{
+    (void)sig;
+    shutdown_flag = 1;
+}
+
+
+int main(void)
+{
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+
+    /*
+     * Main UDP socket.
+     */
+    sock =
+        socket(
+            AF_INET,
+            SOCK_DGRAM,
+            0
+        );
+
+    if (sock < 0) {
+        perror("socket");
+        return 1;
+    }
+
+
+    /*
+     * Large kernel socket buffers.
+     *
+     * The kernel may cap these values depending on
+     * net.core.rmem_max / wmem_max.
+     */
+    int bufsize =
+        8 * 1024 * 1024;
+
+    setsockopt(
+        sock,
+        SOL_SOCKET,
+        SO_RCVBUF,
+        &bufsize,
+        sizeof(bufsize)
+    );
+
+    setsockopt(
+        sock,
+        SOL_SOCKET,
+        SO_SNDBUF,
+        &bufsize,
+        sizeof(bufsize)
+    );
+
+
+    int opt = 1;
+
+    setsockopt(
+        sock,
+        SOL_SOCKET,
+        SO_REUSEADDR,
+        &opt,
+        sizeof(opt)
+    );
+
+    setsockopt(
+        sock,
+        SOL_SOCKET,
+        SO_REUSEPORT,
+        &opt,
+        sizeof(opt)
+    );
+
+
+    /*
+     * Non-blocking.
+     */
+    fcntl(
+        sock,
+        F_SETFL,
+        O_NONBLOCK
+    );
+
+
+    /*
+     * Listen on UDP/53.
+     */
+    struct sockaddr_in addr;
+
+    memset(
+        &addr,
+        0,
+        sizeof(addr)
+    );
+
+    addr.sin_family =
+        AF_INET;
+
+    addr.sin_port =
+        htons(LISTEN_PORT);
+
+    addr.sin_addr.s_addr =
+        INADDR_ANY;
+
+
+    if (bind(
+        sock,
+        (struct sockaddr *)&addr,
+        sizeof(addr)
+    ) < 0) {
+
+        perror("bind");
+        close(sock);
+
+        return 1;
+    }
+
+
+    /*
+     * SlowDNS destination.
+     */
+    struct sockaddr_in slow;
+
+    memset(
+        &slow,
+        0,
+        sizeof(slow)
+    );
+
+    slow.sin_family =
+        AF_INET;
+
+    slow.sin_port =
+        htons(SLOWDNS_PORT);
+
+    inet_pton(
+        AF_INET,
+        "127.0.0.1",
+        &slow.sin_addr
+    );
+
+
+    /*
+     * epoll.
+     */
+    epoll_fd =
+        epoll_create1(0);
+
+    if (epoll_fd < 0) {
+
+        perror("epoll_create1");
+
+        close(sock);
+
+        return 1;
+    }
+
+
+    struct epoll_event ev;
+
+    memset(
+        &ev,
+        0,
+        sizeof(ev)
+    );
+
+    ev.events =
+        EPOLLIN;
+
+    ev.data.fd =
+        sock;
+
+    epoll_ctl(
+        epoll_fd,
+        EPOLL_CTL_ADD,
+        sock,
+        &ev
+    );
+
+
+    /*
+     * Create upstream UDP sockets.
+     */
+    for (
+        int i = 0;
+        i < UPSTREAM_POOL;
+        i++
+    ) {
+
+        upstreams[i].fd =
+            socket(
+                AF_INET,
+                SOCK_DGRAM,
+                0
+            );
+
+        if (upstreams[i].fd < 0)
+            continue;
+
+
+        int ubuf =
+            8 * 1024 * 1024;
+
+        setsockopt(
+            upstreams[i].fd,
+            SOL_SOCKET,
+            SO_RCVBUF,
+            &ubuf,
+            sizeof(ubuf)
+        );
+
+        setsockopt(
+            upstreams[i].fd,
+            SOL_SOCKET,
+            SO_SNDBUF,
+            &ubuf,
+            sizeof(ubuf)
+        );
+
+
+        fcntl(
+            upstreams[i].fd,
+            F_SETFL,
+            O_NONBLOCK
+        );
+
+
+        struct epoll_event ue;
+
+        memset(
+            &ue,
+            0,
+            sizeof(ue)
+        );
+
+        ue.events =
+            EPOLLIN;
+
+        ue.data.fd =
+            upstreams[i].fd;
+
+
+        epoll_ctl(
+            epoll_fd,
+            EPOLL_CTL_ADD,
+            upstreams[i].fd,
+            &ue
+        );
+    }
+
+
+    struct epoll_event events[MAX_EVENTS];
+
+    /*
+     * Avoid running the expensive request-table scan
+     * on every 10 ms epoll cycle.
+     */
+    double last_cleanup =
+        now();
+
+
+    while (!shutdown_flag) {
+
+        int n =
+            epoll_wait(
+                epoll_fd,
+                events,
+                MAX_EVENTS,
+                10
+            );
+
+
+        /*
+         * Cleanup every ~250 ms.
+         */
+        double current =
+            now();
+
+        if (current -
+            last_cleanup >= 0.25) {
+
+            cleanup_expired();
+
+            last_cleanup =
+                current;
+        }
+
+
+        for (
+            int i = 0;
+            i < n;
+            i++
+        ) {
+
+            int fd =
+                events[i].data.fd;
+
+
+            /*
+             * Incoming client request.
+             */
+            if (fd == sock) {
+
+                unsigned char buf[
+                    BUFFER_SIZE
+                ];
+
+                struct sockaddr_in client;
+
+                socklen_t addr_len =
+                    sizeof(client);
+
+
+                int len =
+                    recvfrom(
+                        sock,
+                        buf,
+                        sizeof(buf),
+                        0,
+                        (struct sockaddr *)&client,
+                        &addr_len
+                    );
+
+
+                if (len <= 0)
+                    continue;
+
+
+                /*
+                 * Increase the internal EDNS
+                 * payload capability.
+                 */
+                patch_edns(
+                    buf,
+                    len,
+                    INT_EDNS
+                );
+
+
+                int u =
+                    get_upstream();
+
+
+                if (u < 0)
+                    continue;
+
+
+                insert_req(
+                    u,
+                    buf,
+                    &client,
+                    addr_len
+                );
+
+
+                sendto(
+                    upstreams[u].fd,
+                    buf,
+                    len,
+                    0,
+                    (struct sockaddr *)&slow,
+                    sizeof(slow)
+                );
+
+
+            } else {
+
+                /*
+                 * Response from SlowDNS.
+                 */
+                unsigned char buf[
+                    BUFFER_SIZE
+                ];
+
+
+                int len =
+                    recv(
+                        fd,
+                        buf,
+                        sizeof(buf),
+                        0
+                    );
+
+
+                if (len <= 0)
+                    continue;
+
+
+                uint16_t id =
+                    get_txid(buf);
+
+
+                req_entry_t *e =
+                    find_req(id);
+
+
+                if (!e)
+                    continue;
+
+
+                /*
+                 * Restore external EDNS size.
+                 */
+                patch_edns(
+                    buf,
+                    len,
+                    EXT_EDNS
+                );
+
+
+                sendto(
+                    sock,
+                    buf,
+                    len,
+                    0,
+                    (struct sockaddr *)&e->client_addr,
+                    e->addr_len
+                );
+
+
+                delete_req(e);
+            }
+        }
+    }
+
+
+    /*
+     * Shutdown.
+     */
+    close(sock);
+    close(epoll_fd);
+
+    for (
+        int i = 0;
+        i < UPSTREAM_POOL;
+        i++
+    ) {
+
+        if (upstreams[i].fd > 0)
+            close(upstreams[i].fd);
+    }
+
+
     return 0;
 }
+
 EOF
-    
-    # Compile with optimizations
-    echo -ne "  ${CYAN}Compiling EDNS Proxy with O3 optimizations...${NC}"
-    gcc -O3 -march=native -flto -funroll-loops -fomit-frame-pointer -pipe /tmp/edns.c -o /usr/local/bin/edns-proxy 2>/tmp/compile.log &
-    show_progress $!
-    
-    if [ $? -eq 0 ]; then
-        chmod +x /usr/local/bin/edns-proxy
-        echo -e "\r  ${GREEN}EDNS Proxy compiled successfully${NC}"
-    else
-        echo -e "\r  ${RED}Compilation failed${NC}"
-        exit 1
-    fi
-    
-    # Create EDNS service
-    cat > /etc/systemd/system/edns-proxy.service << EOF
+
+
+echo -e "  ${CYAN}Compiling optimized EDNS proxy...${NC}"
+
+gcc \
+    -O3 \
+    -march=native \
+    -mtune=native \
+    -flto \
+    -fomit-frame-pointer \
+    -ffast-math \
+    -DNDEBUG \
+    /tmp/edns.c \
+    -o /usr/local/bin/edns-proxy
+
+chmod +x /usr/local/bin/edns-proxy
+
+echo -e "  ${GREEN}High-performance EDNS proxy compiled${NC}"
 # ============================================================================
 # EDNS PROXY SERVICE CONFIGURATION
 # ============================================================================
