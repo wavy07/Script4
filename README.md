@@ -1,5 +1,5 @@
 
-🚀 FAST DNS HALOTEL TZ 🇹🇿
+🚀 FAST DNS HALOTEL TZ🔥
 
 Copy the script bash to your VPS to run:
 
