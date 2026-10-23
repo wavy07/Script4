@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex,nofollow">
+<title>V2Ray panel</title>
+<style nonce="__NONCE__">
+:root{
+  --ink:#15232b; --ink2:#51646e; --bg:#e9eef0; --paper:#ffffff; --rule:#cfd9de; --rail:#dde5e9;
+  --harbor:#0f5e73; --harbor-ink:#ffffff; --ok:#2b7a58; --warn:#9c6410; --bad:#a63227; --tint:#f4f7f8;
+  --font:"Segoe UI",Roboto,"Helvetica Neue",Arial,system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{--ink:#e4edf0; --ink2:#93a7b0; --bg:#0f1a1f; --paper:#17262d; --rule:#2b3e47; --rail:#25363f;
+        --harbor:#4fb4cf; --harbor-ink:#08242d; --ok:#5cc08f; --warn:#e0a954; --bad:#ef7d70; --tint:#1c2d35}
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--font);font-variant-numeric:tabular-nums;
+  padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--harbor);outline-offset:2px}
+.hidden{display:none!important}
+header.top{position:sticky;top:0;z-index:5;background:var(--ink);color:var(--bg);padding:10px 16px;
+  padding-top:calc(10px + env(safe-area-inset-top));display:flex;align-items:center;gap:12px}
+@media (prefers-color-scheme:dark){header.top{background:#0a1317}}
+header.top h1{font-size:15px;font-weight:650;letter-spacing:-.01em;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header.top small{display:block;font-weight:400;font-size:12px;opacity:.7}
+.svc{display:flex;gap:6px;align-items:center;font-size:12px}
+.dot{width:9px;height:9px;border-radius:50%;background:#7b8d96;display:inline-block}
+.dot.on{background:#5cc08f}.dot.off{background:#ef7d70}
+main{max-width:860px;margin:0 auto;padding:14px 14px 0}
+.strip{display:flex;gap:0;border:1px solid var(--rule);background:var(--paper);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.strip div{flex:1;padding:10px 12px;border-right:1px solid var(--rule)}
+.strip div:last-child{border-right:0}
+.strip b{display:block;font-size:20px;font-weight:650;letter-spacing:-.02em}
+.strip span{font-size:12px;color:var(--ink2)}
+.warnbar{background:var(--tint);border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:13px}
+.tools{display:flex;gap:8px;margin-bottom:10px}
+.tools input{flex:1}
+input,select,textarea{width:100%;background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:10px 11px;min-height:42px}
+textarea{min-height:76px;font-family:var(--mono);font-size:13px}
+label{display:block;font-size:13px;color:var(--ink2);margin:0 0 4px}
+.field{margin-bottom:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hint{font-size:12.5px;color:var(--ink2);margin:4px 0 0}
+.list{background:var(--paper);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.acc{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--rule);padding:12px 14px;cursor:pointer}
+.acc:last-child{border-bottom:0}
+.acc:hover{background:var(--tint)}
+.acc .l1{display:flex;align-items:baseline;gap:8px}
+.acc .nm{font-weight:650;font-size:16px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{font-size:12px;color:var(--ink2);border:1px solid var(--rule);border-radius:5px;padding:0 6px;line-height:18px}
+.st{margin-left:auto;font-size:12.5px;font-weight:600;white-space:nowrap}
+.st.active{color:var(--ok)}.st.locked,.st.daily{color:var(--warn)}.st.expired,.st.quota{color:var(--bad)}
+.rail{height:8px;background:var(--rail);border-radius:4px;margin:9px 0 6px;position:relative;overflow:hidden}
+.rail i{display:block;height:100%;background:var(--harbor);border-radius:4px}
+.rail.warn i{background:var(--warn)}.rail.bad i{background:var(--bad)}
+.rail.open{background:repeating-linear-gradient(90deg,var(--rail) 0 6px,transparent 6px 10px)}
+.acc .l3{display:flex;gap:12px;font-size:12.5px;color:var(--ink2);flex-wrap:wrap}
+.live{color:var(--ok);font-weight:600}
+.live::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:5px;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live::before{animation:none}}
+.empty{padding:28px 18px;text-align:center;color:var(--ink2)}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:0 16px;border-radius:8px;
+  border:1px solid var(--rule);background:var(--paper);cursor:pointer;font-weight:600}
+.btn.primary{background:var(--harbor);border-color:var(--harbor);color:var(--harbor-ink)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.block{display:flex;width:100%}
+.btn[disabled]{opacity:.55;cursor:default}
+.card{background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:14px;margin-bottom:14px}
+.card h2{font-size:16px;margin:0 0 10px;letter-spacing:-.01em}
+.seg{display:flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.seg button{flex:1;min-height:42px;border:0;border-right:1px solid var(--rule);background:var(--paper);cursor:pointer;font-weight:600}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--harbor);color:var(--harbor-ink)}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--paper);border-top:1px solid var(--rule);display:flex;
+  padding-bottom:env(safe-area-inset-bottom)}
+nav.tabs button{flex:1;min-height:56px;border:0;background:none;cursor:pointer;font-weight:600;color:var(--ink2);
+  border-top:3px solid transparent}
+nav.tabs button[aria-selected=true]{color:var(--harbor);border-top-color:var(--harbor)}
+.scrim{position:fixed;inset:0;background:rgba(8,16,20,.55);z-index:20}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--bg);border-radius:14px 14px 0 0;max-height:92vh;overflow:auto;
+  padding:16px 14px calc(18px + env(safe-area-inset-bottom));max-width:720px;margin:0 auto}
+.sheet h3{margin:0;font-size:19px;letter-spacing:-.02em}
+.sheet .sub{color:var(--ink2);font-size:13px;margin:2px 0 12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:14px;margin-bottom:12px}
+.kv span:nth-child(odd){color:var(--ink2)}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+details{background:var(--paper);border:1px solid var(--rule);border-radius:10px;margin-bottom:10px}
+details summary{padding:12px 14px;cursor:pointer;font-weight:600;min-height:44px}
+details .in{padding:0 14px 14px}
+.link{display:flex;gap:8px;align-items:center;border-top:1px solid var(--rule);padding:9px 0}
+.link:first-child{border-top:0}
+.link .t{flex:1;min-width:0}
+.link .t b{display:block;font-size:13.5px}
+.link .t code{display:block;font:12px var(--mono);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.link .btn{min-height:36px;padding:0 12px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom));z-index:40;background:var(--ink);
+  color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;max-width:90vw}
+.toast.err{background:var(--bad);color:#fff}
+.login{max-width:360px;margin:12vh auto 0;padding:0 18px}
+.login h1{font-size:24px;letter-spacing:-.03em;margin:0 0 4px}
+.login p{color:var(--ink2);margin:0 0 18px}
+.switch{display:flex;align-items:center;gap:12px}
+.switch button{width:52px;height:30px;border-radius:15px;border:1px solid var(--rule);background:var(--rail);position:relative;cursor:pointer;flex:none}
+.switch button::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--ink2)}
+.switch button[aria-checked=true]{background:var(--harbor);border-color:var(--harbor)}
+.switch button[aria-checked=true]::after{left:25px;background:var(--harbor-ink)}
+@media (min-width:760px){
+  .sheet{bottom:auto;top:6vh;border-radius:14px;left:50%;right:auto;transform:translateX(-50%);width:640px}
+  .toast{bottom:90px}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script nonce="__NONCE__">
+"use strict";
+var S = null, TAB = 'accounts', SEARCH = '', timer = null, sheetEl = null, busyTab = false;
+
+/* ---------- small helpers ---------- */
+function h(tag, props) {
+  var e = document.createElement(tag), k, v, kids = Array.prototype.slice.call(arguments, 2);
+  props = props || {};
+  for (k in props) {
+    v = props[k];
+    if (v === false || v == null) continue;
+    if (k === 'class') e.className = v;
+    else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
+    else if (k === 'value') e.value = v;
+    else e.setAttribute(k, v === true ? '' : v);
+  }
+  (function add(list) {
+    list.forEach(function (c) {
+      if (c == null || c === false) return;
+      if (Array.isArray(c)) return add(c);
+      e.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+    });
+  })(kids);
+  return e;
+}
+function $(s, r) { return (r || document).querySelector(s); }
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+  while (n >= 1024 && i < 4) { n /= 1024; i++; }
+  return (i === 0 ? n.toFixed(0) : n.toFixed(n >= 100 ? 0 : 2)) + ' ' + u[i];
+}
+function fmtRate(n) { return fmtBytes(n) + '/s'; }
+function eat(ts) {
+  var d = new Date((ts + 3 * 3600) * 1000), p = function (x) { return (x < 10 ? '0' : '') + x; };
+  return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ' EAT';
+}
+function left(a) {
+  if (!a.expiry) return 'No expiry';
+  var s = a.expiry - S.now;
+  if (s <= 0) return 'Expired';
+  var d = Math.floor(s / 86400), hr = Math.floor((s % 86400) / 3600);
+  return d >= 1 ? d + ' d ' + hr + ' h left' : (hr >= 1 ? hr + ' h left' : Math.max(1, Math.floor(s / 60)) + ' min left');
+}
+var STATUS = { active: 'Active', locked: 'Locked', expired: 'Expired', quota: 'Quota full', daily: 'Daily full' };
+function toast(msg, err) {
+  var t = h('div', { class: 'toast' + (err ? ' err' : ''), role: 'status' }, msg);
+  document.body.appendChild(t);
+  setTimeout(function () { t.remove(); }, err ? 4500 : 2200);
+}
+function api(path, body) {
+  var opt = body === undefined ? { credentials: 'same-origin' } : {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'ffv2panel' }, body: JSON.stringify(body)
+  };
+  return fetch('api/' + path, opt).then(function (r) {
+    return r.json().catch(function () { return {}; }).then(function (d) {
+      if (r.status === 401) { showLogin(); throw new Error('login'); }
+      if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+      return d;
+    });
+  });
+}
+function act(btn, path, body, okMsg, after) {
+  if (btn) btn.disabled = true;
+  return api(path, body).then(function (d) {
+    toast(okMsg);
+    return refresh().then(function () { if (after) after(d); });
+  }).catch(function (e) { if (e.message !== 'login') toast(e.message, true); })
+    .then(function () { if (btn) btn.disabled = false; });
+}
+function copy(text) {
+  function fallback() {
+    var ta = h('textarea', { style: 'position:fixed;opacity:0' }); ta.value = text;
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('Copied'); } catch (e) { toast('Copy failed - select the text by hand', true); }
+    ta.remove();
+  }
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(function () { toast('Copied'); }, fallback);
+  else fallback();
+}
+function num(v) { return v === '' || v == null ? 0 : Number(v); }
+
+/* ---------- login ---------- */
+function showLogin() {
+  clearInterval(timer); closeSheet();
+  var app = $('#app'); app.textContent = '';
+  var u = h('input', { id: 'lu', autocomplete: 'username', value: 'admin', autocapitalize: 'none' });
+  var p = h('input', { id: 'lp', type: 'password', autocomplete: 'current-password' });
+  var b = h('button', { class: 'btn primary block', type: 'button' }, 'Sign in');
+  function go() {
+    b.disabled = true;
+    api('login', { user: u.value, password: p.value }).then(function () { start(); })
+      .catch(function (e) { toast(e.message, true); b.disabled = false; });
+  }
+  b.addEventListener('click', go);
+  p.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+  app.appendChild(h('div', { class: 'login' },
+    h('h1', null, 'V2Ray panel'), h('p', null, 'Sign in to manage accounts.'),
+    h('div', { class: 'field' }, h('label', { for: 'lu' }, 'Username'), u),
+    h('div', { class: 'field' }, h('label', { for: 'lp' }, 'Password'), p), b));
+  p.focus();
+}
+
+/* ---------- shell ---------- */
+function start() {
+  var app = $('#app'); app.textContent = '';
+  app.appendChild(h('header', { class: 'top' },
+    h('h1', { id: 'ttl' }, 'V2Ray panel'), h('div', { class: 'svc', id: 'svc' })));
+  app.appendChild(h('main', { id: 'main' }));
+  var tabs = h('nav', { class: 'tabs', role: 'tablist' });
+  [['accounts', 'Accounts'], ['add', 'New account'], ['settings', 'Settings']].forEach(function (t) {
+    tabs.appendChild(h('button', {
+      role: 'tab', 'data-t': t[0], 'aria-selected': String(t[0] === TAB),
+      onclick: function () { setTab(t[0]); }
+    }, t[1]));
+  });
+  app.appendChild(tabs);
+  refresh().then(function () { render(); });
+  clearInterval(timer);
+  timer = setInterval(function () { if (TAB === 'accounts' && !sheetEl && !busyTab && !document.hidden) refresh(); }, 4000);
+}
+function setTab(t) {
+  TAB = t;
+  Array.prototype.forEach.call(document.querySelectorAll('nav.tabs button'), function (b) {
+    b.setAttribute('aria-selected', String(b.getAttribute('data-t') === t));
+  });
+  render(); window.scrollTo(0, 0);
+}
+function refresh() {
+  return api('state').then(function (d) {
+    S = d; paintHeader();
+    if (TAB === 'accounts' && !sheetEl) paintList();
+  }).catch(function (e) { if (e.message !== 'login') toast(e.message, true); });
+}
+function paintHeader() {
+  var t = $('#ttl'); if (!t || !S) return;
+  t.textContent = '';
+  t.appendChild(document.createTextNode(S.settings.domain || 'V2Ray panel'));
+  t.appendChild(h('small', null, S.xray || 'Xray'));
+  var sv = $('#svc'); sv.textContent = '';
+  Object.keys(S.services).forEach(function (k) {
+    var nm = k.replace(/^ff-/, '').replace(/^v2ray-/, '');
+    sv.appendChild(h('span', { title: k + (S.services[k] ? ' is running' : ' is stopped') },
+      h('i', { class: 'dot ' + (S.services[k] ? 'on' : 'off') }), ' ', nm));
+  });
+}
+function render() {
+  var m = $('#main'); if (!m || !S) return;
+  m.textContent = '';
+  if (TAB === 'accounts') renderAccounts(m);
+  else if (TAB === 'add') renderAdd(m);
+  else renderSettings(m);
+}
+
+/* ---------- accounts ---------- */
+function renderAccounts(m) {
+  var live = S.online, n = S.accounts.length;
+  m.appendChild(h('div', { class: 'strip' },
+    h('div', null, h('b', null, n), h('span', null, 'accounts')),
+    h('div', null, h('b', null, live), h('span', null, 'online now')),
+    h('div', null, h('b', null, fmtBytes(S.day_bytes)), h('span', null, 'used today'))));
+  if (S.usage_age > 30 && S.installed)
+    m.appendChild(h('div', { class: 'warnbar' }, 'Usage counters have not updated for ' + S.usage_age + ' s. Check that the limiter service is running (Settings > Services).'));
+  if (!S.installed)
+    m.appendChild(h('div', { class: 'warnbar' }, 'V2Ray (Xray) is not installed on this server yet. Run ffv2ray.py install in the terminal first.'));
+  var q = h('input', { type: 'search', placeholder: 'Search accounts', value: SEARCH, 'aria-label': 'Search accounts' });
+  q.addEventListener('input', function () { SEARCH = q.value; paintList(); });
+  m.appendChild(h('div', { class: 'tools' }, q));
+  m.appendChild(h('div', { class: 'list', id: 'list' }));
+  paintList();
+}
+function paintList() {
+  var box = $('#list'); if (!box) return;
+  box.textContent = '';
+  var q = SEARCH.trim().toLowerCase();
+  var rows = S.accounts.filter(function (a) { return !q || a.name.toLowerCase().indexOf(q) >= 0 || a.proto.indexOf(q) >= 0; });
+  if (!rows.length) {
+    box.appendChild(h('div', { class: 'empty' }, h('b', null, S.accounts.length ? 'No match' : 'No accounts yet'),
+      S.accounts.length ? 'Try another name or protocol.' : 'Open "New account" to create the first one.'));
+    return;
+  }
+  rows.forEach(function (a) {
+    var total = a.total_gb > 0, pct = total ? Math.min(100, a.used / (a.total_gb * 1073741824) * 100) : 0;
+    var rail = h('div', { class: 'rail' + (total ? (pct >= 100 ? ' bad' : pct >= 85 ? ' warn' : '') : ' open') });
+    if (total) rail.appendChild(h('i', { style: 'width:' + pct.toFixed(1) + '%' }));
+    box.appendChild(h('button', { class: 'acc', onclick: function () { openSheet(a.name); } },
+      h('div', { class: 'l1' }, h('span', { class: 'nm' }, a.name), h('span', { class: 'tag' }, a.proto),
+        a.trial ? h('span', { class: 'tag' }, 'trial') : null,
+        h('span', { class: 'st ' + a.status }, STATUS[a.status] || a.status)),
+      rail,
+      h('div', { class: 'l3' },
+        h('span', null, fmtBytes(a.used) + (total ? ' of ' + a.total_gb + ' GB' : ' used')),
+        h('span', null, left(a)),
+        h('span', null, a.devices + (a.conn_limit ? '/' + a.conn_limit : '') + (a.devices === 1 && !a.conn_limit ? ' device' : ' devices')),
+        a.live ? h('span', { class: 'live' }, '↓ ' + fmtRate(a.rate_down) + '  ↑ ' + fmtRate(a.rate_up)) : null)));
+  });
+}
+
+/* ---------- account sheet ---------- */
+function closeSheet() {
+  if (sheetEl) { sheetEl.scrim.remove(); sheetEl.box.remove(); sheetEl = null; }
+  if (S && TAB === 'accounts') paintList();
+}
+function openSheet(name) {
+  var a = S.accounts.filter(function (x) { return x.name === name; })[0];
+  if (!a) return;
+  closeSheet();
+  var scrim = h('div', { class: 'scrim', onclick: closeSheet });
+  var box = h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Account ' + name });
+  sheetEl = { scrim: scrim, box: box };
+  document.body.appendChild(scrim); document.body.appendChild(box);
+  fillSheet(a);
+}
+function fillSheet(a) {
+  var box = sheetEl.box; box.textContent = '';
+  var inDays = h('input', { type: 'number', min: '0.01', step: 'any', value: '30', inputmode: 'decimal' });
+  var inReset = h('input', { type: 'checkbox', id: 'rr' });
+  var lt = h('input', { type: 'number', min: '0', step: 'any', value: a.total_gb, inputmode: 'decimal' });
+  var ld = h('input', { type: 'number', min: '0', step: 'any', value: a.daily_gb, inputmode: 'decimal' });
+  var lc = h('input', { type: 'number', min: '0', step: '1', value: a.conn_limit, inputmode: 'numeric' });
+  var lr = h('input', { type: 'checkbox', id: 'lr' });
+  var ed = h('input', { type: 'number', min: '0', step: 'any', value: '30', inputmode: 'decimal' });
+  var linksBox = h('div', null, h('p', { class: 'hint' }, 'Loading links…'));
+  var del = h('button', { class: 'btn danger block', type: 'button' }, 'Delete account');
+  var armed = false;
+  del.addEventListener('click', function () {
+    if (!armed) { armed = true; del.textContent = 'Tap again to delete ' + a.name; setTimeout(function () { armed = false; del.textContent = 'Delete account'; }, 4000); return; }
+    act(del, 'del', { name: a.name }, 'Deleted', closeSheet);
+  });
+  var lockBtn = h('button', { class: 'btn', type: 'button' }, a.locked ? 'Unlock' : 'Lock');
+  lockBtn.addEventListener('click', function () {
+    act(lockBtn, a.locked ? 'unlock' : 'lock', { name: a.name }, a.locked ? 'Unlocked' : 'Locked', function () { reopen(a.name); });
+  });
+  box.appendChild(h('div', { style: 'display:flex;align-items:flex-start;gap:10px' },
+    h('div', { style: 'flex:1;min-width:0' }, h('h3', null, a.name),
+      h('div', { class: 'sub' }, a.proto + ' · ' + (STATUS[a.status] || a.status))),
+    h('button', { class: 'btn', type: 'button', onclick: closeSheet, 'aria-label': 'Close' }, 'Close')));
+  box.appendChild(h('div', { class: 'kv' },
+    h('span', null, 'Used'), h('span', null, fmtBytes(a.used) + '  (↓ ' + fmtBytes(a.down) + '  ↑ ' + fmtBytes(a.up) + ')'),
+    h('span', null, 'Today'), h('span', null, fmtBytes(a.used_daily) + (a.daily_gb ? ' of ' + a.daily_gb + ' GB' : '')),
+    h('span', null, 'Expires'), h('span', null, a.expiry ? eat(a.expiry) + ' · ' + left(a) : 'Never'),
+    h('span', null, 'Devices'), h('span', null, a.devices + (a.conn_limit ? ' of ' + a.conn_limit : ' online, no limit')),
+    h('span', null, 'ID'), h('span', { style: 'word-break:break-all;font-family:var(--mono);font-size:12.5px' }, a.id),
+    h('span', null, 'Created'), h('span', null, eat(a.created))));
+  box.appendChild(h('div', { class: 'acts' }, lockBtn,
+    h('button', { class: 'btn', type: 'button', onclick: function () { copy(a.id); } }, 'Copy ID')));
+  var det = h('details', { open: true }, h('summary', null, 'Connection links'), h('div', { class: 'in' }, linksBox));
+  box.appendChild(det);
+  box.appendChild(h('details', null, h('summary', null, 'Renew'), h('div', { class: 'in' },
+    h('div', { class: 'field' }, h('label', null, 'Add days (from the current expiry, or from now if expired)'), inDays),
+    h('div', { class: 'field' }, h('label', { for: 'rr', style: 'display:flex;gap:8px;align-items:center;color:var(--ink)' }, inReset, 'Also reset used traffic')),
+    h('button', { class: 'btn primary block', type: 'button', onclick: function (ev) {
+      act(ev.currentTarget, 'renew', { name: a.name, days: num(inDays.value), reset: inReset.checked }, 'Renewed', function () { reopen(a.name); });
+    } }, 'Renew account'))));
+  box.appendChild(h('details', null, h('summary', null, 'Limits'), h('div', { class: 'in' },
+    h('div', { class: 'row2' },
+      h('div', { class: 'field' }, h('label', null, 'Total GB (0 = none)'), lt),
+      h('div', { class: 'field' }, h('label', null, 'Daily GB (0 = none)'), ld)),
+    h('div', { class: 'field' }, h('label', null, 'Devices (0 = unlimited)'), lc),
+    h('div', { class: 'field' }, h('label', { for: 'lr', style: 'display:flex;gap:8px;align-items:center;color:var(--ink)' }, lr, 'Also reset used traffic')),
+    h('button', { class: 'btn primary block', type: 'button', onclick: function (ev) {
+      act(ev.currentTarget, 'limit', { name: a.name, total_gb: num(lt.value), daily_gb: num(ld.value), conn_limit: num(lc.value), reset: lr.checked }, 'Limits saved', function () { reopen(a.name); });
+    } }, 'Save limits'))));
+  box.appendChild(h('details', null, h('summary', null, 'Set expiry'), h('div', { class: 'in' },
+    h('div', { class: 'field' }, h('label', null, 'Days from now'), ed),
+    h('div', { class: 'acts' },
+      h('button', { class: 'btn primary', type: 'button', onclick: function (ev) {
+        act(ev.currentTarget, 'expiry', { name: a.name, days: num(ed.value) }, 'Expiry set', function () { reopen(a.name); });
+      } }, 'Set expiry'),
+      h('button', { class: 'btn', type: 'button', onclick: function (ev) {
+        act(ev.currentTarget, 'expiry', { name: a.name, never: true }, 'Expiry removed', function () { reopen(a.name); });
+      } }, 'Never expires')))));
+  box.appendChild(del);
+  api('links?name=' + encodeURIComponent(a.name)).then(function (d) {
+    linksBox.textContent = '';
+    d.links.forEach(function (l) {
+      linksBox.appendChild(h('div', { class: 'link' },
+        h('div', { class: 't' }, h('b', null, l.label), h('code', null, l.text.slice(0, 90))),
+        h('button', { class: 'btn', type: 'button', onclick: function () { copy(l.text); } }, 'Copy')));
+    });
+  }).catch(function (e) { linksBox.textContent = e.message; });
+}
+function reopen(name) {
+  if (!sheetEl) return;
+  var a = S.accounts.filter(function (x) { return x.name === name; })[0];
+  if (a) fillSheet(a);
+}
+
+/* ---------- new account ---------- */
+function renderAdd(m) {
+  var proto = S.protos[1] || S.protos[0];
+  var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Protocol' });
+  function paintSeg() {
+    seg.textContent = '';
+    S.protos.forEach(function (p) {
+      seg.appendChild(h('button', { type: 'button', 'aria-pressed': String(p === proto), onclick: function () { proto = p; paintSeg(); } }, p));
+    });
+  }
+  paintSeg();
+  var name = h('input', { id: 'an', autocomplete: 'off', autocapitalize: 'none', placeholder: 'e.g. juma01' });
+  var days = h('input', { id: 'ad', type: 'number', min: '0.01', step: 'any', value: '30', inputmode: 'decimal' });
+  var tot = h('input', { id: 'at', type: 'number', min: '0', step: 'any', value: '0', inputmode: 'decimal' });
+  var dai = h('input', { id: 'ai', type: 'number', min: '0', step: 'any', value: '0', inputmode: 'decimal' });
+  var con = h('input', { id: 'ac', type: 'number', min: '0', step: '1', value: '0', inputmode: 'numeric' });
+  var cid = h('input', { id: 'aid', autocomplete: 'off', placeholder: 'Leave empty for a random UUID' });
+  var trial = h('input', { type: 'checkbox', id: 'atr' });
+  var go = h('button', { class: 'btn primary block', type: 'button' }, 'Create account');
+  go.addEventListener('click', function () {
+    busyTab = true;
+    act(go, 'add', { proto: proto, name: name.value.trim(), days: num(days.value), total_gb: num(tot.value), daily_gb: num(dai.value),
+      conn_limit: num(con.value), id: cid.value.trim(), trial: trial.checked }, 'Created', function () {
+      busyTab = false; var nm = name.value.trim(); setTab('accounts'); openSheet(nm);
+    }).then(function () { busyTab = false; });
+  });
+  m.appendChild(h('div', { class: 'card' }, h('h2', null, 'New account'),
+    h('div', { class: 'field' }, h('label', null, 'Protocol'), seg),
+    h('div', { class: 'field' }, h('label', { for: 'an' }, 'Name'), name,
+      h('p', { class: 'hint' }, '2-24 characters: letters, digits, _ or -')),
+    h('div', { class: 'field' }, h('label', { for: 'ad' }, 'Valid for (days)'), days),
+    h('div', { class: 'row2' },
+      h('div', { class: 'field' }, h('label', { for: 'at' }, 'Total GB (0 = none)'), tot),
+      h('div', { class: 'field' }, h('label', { for: 'ai' }, 'Daily GB (0 = none)'), dai)),
+    h('div', { class: 'field' }, h('label', { for: 'ac' }, 'Devices (0 = unlimited)'), con),
+    h('div', { class: 'field' }, h('label', { for: 'aid' }, 'Custom ID (optional)'), cid),
+    h('div', { class: 'field' }, h('label', { for: 'atr', style: 'display:flex;gap:8px;align-items:center;color:var(--ink)' }, trial, 'Mark as trial')),
+    go));
+}
+
+/* ---------- settings ---------- */
+function field(id, label, val, hint, ph) {
+  return h('div', { class: 'field' }, h('label', { for: id }, label),
+    h('input', { id: id, value: val || '', placeholder: ph || '', autocomplete: 'off', autocapitalize: 'none' }),
+    hint ? h('p', { class: 'hint' }, hint) : null);
+}
+function renderSettings(m) {
+  var s = S.settings;
+  /* client options */
+  var c1 = field('s_addr', 'Connect address (bug host)', s.cfg_address, 'Empty = your domain.');
+  var c2 = field('s_sni', 'SNI', s.cfg_sni, 'TLS name the app sends. Empty = same as the address.');
+  var c3 = field('s_host', 'Host header', s.cfg_host, 'Empty = your domain.');
+  m.appendChild(h('div', { class: 'card' }, h('h2', null, 'Client config'),
+    c1, c2, c3,
+    h('button', { class: 'btn primary block', type: 'button', onclick: function (ev) {
+      act(ev.currentTarget, 'client', { cfg_address: $('input', c1).value, cfg_sni: $('input', c2).value, cfg_host: $('input', c3).value }, 'Saved', render);
+    } }, 'Save client config'),
+    h('p', { class: 'hint' }, 'Changes the links and JSON configs. Users need the new links.')));
+
+  /* SNI lock */
+  var on = !!s.sni_lock;
+  var sw = h('button', { type: 'button', role: 'switch', 'aria-checked': String(on), 'aria-label': 'SNI lock' });
+  sw.addEventListener('click', function () {
+    var want = !(sw.getAttribute('aria-checked') === 'true');
+    act(sw, 'snilock', { on: want }, want ? 'SNI lock on' : 'SNI lock off', render);
+  });
+  var why = null;
+  if (!s.nginx_reject_ok) why = 'This nginx is older than 1.19.4 and cannot refuse a handshake.';
+  else if (!s.cfg_sni || s.cfg_sni.toLowerCase() === (s.domain || '').toLowerCase()) why = 'Set a client SNI that differs from the domain first.';
+  else if (s.decoy_port) why = 'HAProxy owns ports 80/443 here, so nginx cannot apply the lock.';
+  m.appendChild(h('div', { class: 'card' }, h('h2', null, 'SNI lock'),
+    h('div', { class: 'switch' }, sw, h('div', null, on ? (s.sni_lock_active ? 'On and active' : 'On, but not active') : 'Off')),
+    h('p', { class: 'hint' }, 'A host checker that uses your domain as SNI gets the "unrecognized_name" TLS error. Apps still connect with the client SNI above.'),
+    why ? h('p', { class: 'hint', style: 'color:var(--warn)' }, why) : null,
+    s.cdn ? h('p', { class: 'hint', style: 'color:var(--warn)' }, 'A CDN is on: it must connect to your origin with the client SNI, not the domain.') : null));
+
+  /* XHTTP */
+  var modes = h('select', { id: 'x_mode' }, h('option', { value: '' }, 'Default'));
+  S.xhttp_modes.forEach(function (x) { modes.appendChild(h('option', { value: x, selected: s.xhttp_mode === x }, x)); });
+  var xp = field('x_path', 'Path base', s.xhttp_path, 'Final paths: <base>-vmess, <base>-vless, <base>-trojan. Default /xhttp.');
+  var xpad = field('x_pad', 'xPaddingBytes', s.xhttp_padding, null, '100-1000');
+  var xmp = field('x_mp', 'scMaxEachPostBytes', s.xhttp_max_post, null, '1000000');
+  var xmi = field('x_mi', 'scMinPostsIntervalMs', s.xhttp_min_interval, null, '30');
+  var xmb = field('x_mb', 'scMaxBufferedPosts', s.xhttp_max_buffered, null, '30');
+  var xex = h('textarea', { id: 'x_ex', placeholder: '{"xmux":{"maxConcurrency":"16-32"}}', spellcheck: 'false' }); xex.value = s.xhttp_extra || '';
+  m.appendChild(h('div', { class: 'card' }, h('h2', null, 'XHTTP'),
+    s.xhttp_supported ? null : h('div', { class: 'warnbar' }, 'The installed Xray core is too old for XHTTP. Update the core first.'),
+    h('div', { class: 'field' }, h('label', { for: 'x_mode' }, 'Mode'), modes,
+      h('p', { class: 'hint' }, 'stream-up and stream-one need a path that streams end to end, so they usually fail behind a CDN.')),
+    xp, h('div', { class: 'row2' }, xpad, xmp), h('div', { class: 'row2' }, xmi, xmb),
+    h('div', { class: 'field' }, h('label', { for: 'x_ex' }, 'Extra JSON (advanced)'), xex,
+      h('p', { class: 'hint' }, 'Merged into xhttpSettings on the server and in every client config.')),
+    h('button', { class: 'btn primary block', type: 'button', onclick: function (ev) {
+      act(ev.currentTarget, 'xhttp', {
+        xhttp_path: $('input', xp).value, xhttp_mode: modes.value, xhttp_padding: $('input', xpad).value,
+        xhttp_max_post: $('input', xmp).value, xhttp_min_interval: $('input', xmi).value,
+        xhttp_max_buffered: $('input', xmb).value, xhttp_extra: xex.value
+      }, 'XHTTP saved and applied', render);
+    } }, 'Save and apply'),
+    h('p', { class: 'hint' }, 'Applies to the server and to every link. Users need the new links.')));
+
+  /* services */
+  var svcRows = Object.keys(S.services).map(function (k) {
+    return h('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:4px' },
+      h('i', { class: 'dot ' + (S.services[k] ? 'on' : 'off') }), h('span', null, k), h('span', { class: 'hint', style: 'margin:0 0 0 auto' }, S.services[k] ? 'running' : 'stopped'));
+  });
+  m.appendChild(h('div', { class: 'card' }, h('h2', null, 'Services'), svcRows,
+    h('button', { class: 'btn block', type: 'button', style: 'margin-top:10px', onclick: function (ev) {
+      act(ev.currentTarget, 'restart', {}, 'Restarted');
+    } }, 'Re-render config and restart Xray')));
+
+  /* password + sign out */
+  var po = h('input', { id: 'p_o', type: 'password', autocomplete: 'current-password' });
+  var pn = h('input', { id: 'p_n', type: 'password', autocomplete: 'new-password' });
+  m.appendChild(h('div', { class: 'card' }, h('h2', null, 'Panel password'),
+    h('div', { class: 'field' }, h('label', { for: 'p_o' }, 'Current password'), po),
+    h('div', { class: 'field' }, h('label', { for: 'p_n' }, 'New password (8+ characters)'), pn),
+    h('button', { class: 'btn primary block', type: 'button', onclick: function (ev) {
+      act(ev.currentTarget, 'password', { old: po.value, new: pn.value }, 'Password changed', function () { showLogin(); });
+    } }, 'Change password'),
+    h('button', { class: 'btn block', type: 'button', style: 'margin-top:8px', onclick: function () {
+      api('logout', {}).then(showLogin, showLogin);
+    } }, 'Sign out')));
+}
+
+/* ---------- boot ---------- */
+api('state').then(function () { start(); }).catch(function (e) { if (e.message !== 'login') { showLogin(); } });
+</script>
+</body>
+</html>
